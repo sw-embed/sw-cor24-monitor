@@ -1,0 +1,1 @@
+Created boot.s (SP init at 0xFEEC00, falls through to tc24r _start), monitor.c (UART MMIO driver with TX-busy/RX-ready polling, boot banner), and justfile build pipeline. Fixed agentrail TOML format. Verified: 241 bytes, 791 instructions to banner, clean halt. Boot banner: 'cor24 monitor v0.1'

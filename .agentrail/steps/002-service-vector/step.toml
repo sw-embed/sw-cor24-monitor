@@ -1,6 +1,6 @@
 number = 2
 slug = "service-vector"
-status = "pending"
+status = "in-progress"
 description = """
 Create the service vector table at address 0x500 and implement the
 I/O services that programs will call.
