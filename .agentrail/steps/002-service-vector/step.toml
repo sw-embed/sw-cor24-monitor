@@ -1,7 +1,7 @@
-[step]
-name = "002-service-vector"
+number = 2
+slug = "service-vector"
 status = "pending"
-prompt = """
+description = """
 Create the service vector table at address 0x500 and implement the
 I/O services that programs will call.
 
@@ -35,3 +35,6 @@ I/O services that programs will call.
 Note: tc24r has no structs, so the vector table is just consecutive
 words in memory. Programs will index into it.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T16:30:00"
