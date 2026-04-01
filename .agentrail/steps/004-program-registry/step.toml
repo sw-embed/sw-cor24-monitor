@@ -1,6 +1,6 @@
 number = 4
 slug = "program-registry"
-status = "pending"
+status = "in-progress"
 description = """
 Implement the program registry — a table mapping program names to
 entry addresses, using parallel arrays (no structs).

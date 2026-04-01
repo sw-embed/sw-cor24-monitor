@@ -10,6 +10,13 @@ int *IO_UARTSTAT;
 int mon_saved_sp;
 int mon_last_rc;
 
+/* --- Program registry (parallel arrays, no structs) --- */
+
+int prog_names[16];
+int prog_entries[16];
+int prog_flags[16];
+int prog_count;
+
 void uart_init() {
     IO_UARTDATA = 0xFF0100;
     IO_UARTSTAT = 0xFF0101;
@@ -134,6 +141,62 @@ void svc_init() {
     svc_set_exit();
 }
 
+/* --- String helpers --- */
+
+int mon_strcmp(char *a, char *b) {
+    while (*a && *b) {
+        if (*a != *b) return *a - *b;
+        a = a + 1;
+        b = b + 1;
+    }
+    return *a - *b;
+}
+
+/* --- Program registry --- */
+
+int mon_register(char *name, int entry, int flags) {
+    int i;
+    i = prog_count;
+    if (i >= 16) return -1;
+    prog_names[i] = name;
+    prog_entries[i] = entry;
+    prog_flags[i] = flags;
+    prog_count = i + 1;
+    return i;
+}
+
+int mon_find_program(char *name) {
+    int i;
+    i = 0;
+    while (i < prog_count) {
+        if (mon_strcmp(name, prog_names[i]) == 0) return i;
+        i = i + 1;
+    }
+    return -1;
+}
+
+int mon_run_by_name(char *name) {
+    int idx;
+    idx = mon_find_program(name);
+    if (idx < 0) {
+        uart_puts("unknown program: ");
+        uart_puts(name);
+        uart_putchar(10);
+        return -1;
+    }
+    return mon_run(prog_entries[idx]);
+}
+
+void mon_list_programs() {
+    int i;
+    i = 0;
+    while (i < prog_count) {
+        uart_puts(prog_names[i]);
+        uart_putchar(10);
+        i = i + 1;
+    }
+}
+
 /* --- Program invocation --- */
 
 int mon_run(int entry) {
@@ -149,27 +212,53 @@ int mon_run(int entry) {
 int main() {
     int rc;
     uart_init();
-    uart_puts("cor24 monitor v0.2\n");
+    uart_puts("cor24 monitor v0.3\n");
     svc_init();
     uart_puts("svc: vector ready\n");
 
-    /* Test: invoke echo at 0x2000 */
-    uart_puts("run echo\n");
-    rc = mon_run(0x2000);
+    /* Register demo programs */
+    prog_count = 0;
+    mon_register("echo", 0x2000, 0);
+    mon_register("ret42", 0x3000, 0);
+    mon_register("exit7", 0x4000, 0);
+    uart_puts("reg: ");
+    uart_put_int(prog_count);
+    uart_puts(" programs\n");
+
+    /* Test: list programs */
+    uart_puts("--- list ---\n");
+    mon_list_programs();
+
+    /* Test: find by name */
+    uart_puts("find echo=");
+    uart_put_int(mon_find_program("echo"));
+    uart_putchar(10);
+    uart_puts("find nope=");
+    uart_put_int(mon_find_program("nope"));
+    uart_putchar(10);
+
+    /* Test: run by name */
+    uart_puts("--- run echo ---\n");
+    rc = mon_run_by_name("echo");
     uart_puts("rc=");
     uart_put_int(rc);
     uart_putchar(10);
 
-    /* Test: invoke ret42 at 0x3000 */
-    uart_puts("run ret42\n");
-    rc = mon_run(0x3000);
+    uart_puts("--- run ret42 ---\n");
+    rc = mon_run_by_name("ret42");
     uart_puts("rc=");
     uart_put_int(rc);
     uart_putchar(10);
 
-    /* Test: invoke exit7 at 0x4000 (svc_exit test) */
-    uart_puts("run exit7\n");
-    rc = mon_run(0x4000);
+    uart_puts("--- run exit7 ---\n");
+    rc = mon_run_by_name("exit7");
+    uart_puts("rc=");
+    uart_put_int(rc);
+    uart_putchar(10);
+
+    /* Test: run unknown program */
+    uart_puts("--- run bogus ---\n");
+    rc = mon_run_by_name("bogus");
     uart_puts("rc=");
     uart_put_int(rc);
     uart_putchar(10);
