@@ -1,0 +1,37 @@
+[step]
+name = "002-service-vector"
+status = "pending"
+prompt = """
+Create the service vector table at address 0x500 and implement the
+I/O services that programs will call.
+
+1. Define the service vector layout — a flat array of function
+   addresses at 0x500:
+   - Slot 0: svc_putchar (int ch) → int
+   - Slot 1: svc_getchar (void) → int
+   - Slot 2: svc_write (char *buf, int len) → int
+   - Slot 3: svc_readline (char *buf, int max) → int
+   - Slot 4: svc_exit (int rc) → noreturn
+
+2. Implement each service function in monitor.c:
+   - svc_putchar: wraps uart_putchar
+   - svc_getchar: wraps uart_getchar
+   - svc_write: loop calling svc_putchar
+   - svc_readline: read chars into buffer until newline or max,
+     handle backspace, echo characters
+   - svc_exit: store RC, longjump/return to monitor (details in
+     phase 3, stub for now)
+
+3. Initialize the vector table in monitor_init():
+   - Write function addresses to the flat array at 0x500
+   - Since tc24r has no function pointers as first-class values,
+     may need assembler glue or address-of tricks
+
+4. Write a minimal validation test:
+   - A small program (could be inline in monitor for now) that
+     loads the service vector, calls putchar through it, and
+     verifies output appears on UART
+
+Note: tc24r has no structs, so the vector table is just consecutive
+words in memory. Programs will index into it.
+"""

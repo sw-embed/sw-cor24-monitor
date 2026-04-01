@@ -1,0 +1,126 @@
+You are setting up the sw-cor24-monitor repository for AI-agent-driven
+development. This repo lives at ~/github/sw-embed/sw-cor24-monitor/ and
+will contain the COR24 resident monitor / service processor.
+
+Read docs/research.txt thoroughly before proceeding. It contains all
+design decisions already made. Do not revisit or change them.
+
+== WHAT THIS PROJECT IS ==
+
+sw-cor24-monitor is a resident monitor and terminal controller for the
+COR24 soft CPU. It boots at address 0, owns the UART hardware
+exclusively, and provides a synchronous call/return program invocation
+environment with structured argument passing and return codes.
+
+Key design decisions already locked in (from research.txt):
+- Monitor at address 0, runtime/service vector at 0x500, shell at
+  0x1000, user programs at 0x2000+
+- Only the monitor touches UART MMIO — all programs use service calls
+- Synchronous call/return execution model (no scheduler/multitasking)
+- Service vector table: putchar, getchar, write, readline, exit
+- Invocation block: argc, argv, cmdline, flags passed to programs
+- Program entry: int prog_main(mon_context *ctx) where ctx holds
+  both invocation block and service vector pointers
+- Return trampoline so monitor always regains control
+- Program registry maps names to fixed entry addresses
+- RC propagation: program RC flows back to shell as $rc
+- Three error classes: program RC, monitor invocation failure,
+  program fault
+- Assembler for bootstrap/trampoline, C for policy/registry/shell
+- Single foreground console owner model
+- Future: terminal multiplexor for multi-CPU FPGA/MCU systems
+
+== YOUR TASKS ==
+
+IMPORTANT: Do NOT create the agentrail saga yet. You must first
+produce documentation and get user feedback.
+
+1. Read docs/research.txt completely. Extract all architectural
+   decisions, ABIs, data structures, and milestones.
+
+2. Create docs/prd.md (Product Requirements Document):
+   - Problem statement and goals
+   - Target users and use cases
+   - Functional requirements (monitor boot, program invocation,
+     UART ownership, RC handling, program registry, fault handling)
+   - Non-functional requirements (memory constraints, tc24r C subset
+     limitations, educational clarity)
+   - Out of scope (for now): multitasking, preemption, dynamic
+     loading, multi-CPU multiplexing
+
+3. Create docs/architecture.md:
+   - Memory map diagram (kernel, runtime, shell, program slots,
+     stacks, RAM disk)
+   - Layer diagram (monitor → runtime → shell → programs)
+   - Service vector table layout
+   - Invocation block structure
+   - Program registry structure
+   - Boot sequence
+   - Call flow: shell → mon_run → program → return/exit → RC
+
+4. Create docs/design.md:
+   - ABI specifications: program entry convention, service call
+     convention, calling convention (registers, stack)
+   - UART ownership model (write path, read path)
+   - Return trampoline mechanism
+   - Error handling (3 classes: RC, invocation failure, fault)
+   - Assembler vs C code split decisions
+   - tc24r constraints and workarounds (no structs → parallel arrays)
+
+5. Create docs/plan.md:
+   - Implementation phases derived from research.txt milestones
+   - Phase dependencies and ordering
+   - Testing strategy for each phase
+   - Milestone 1: synchronous monitored program call (echo demo)
+   - Milestone 2: script-visible RC and shell integration
+
+6. ASK THE USER QUESTIONS:
+   After creating the four docs above, present a numbered list of
+   questions to the user about ambiguities, gaps, or decisions that
+   need confirmation. Examples of things to ask about:
+   - Exact register save/restore set for the trampoline
+   - Stack size and number of program slots
+   - Whether to support the invocation block immediately or start
+     with simpler argc/argv
+   - UART buffer sizes and line editing scope
+   - Relationship to sw-cor24-script: does the shell live in this
+     repo or in sw-cor24-script?
+   - Any COR24 ISA features (trap instruction?) that affect the ABI
+   Do NOT proceed to saga creation until the user answers.
+
+7. AFTER user answers: Create the agentrail saga.
+   - Write .agentrail/saga.toml
+   - Write saga steps in .agentrail/steps/ based on the finalized
+     plan.md and user feedback
+   - Each step.toml should have [step] with name, status = "pending",
+     and a detailed prompt field
+
+8. Write README.md:
+   - Project name, one-line description
+   - Architecture overview (monitor as service processor)
+   - Current status: "In development"
+   - Relationship to other repos
+   - License section
+
+9. Commit everything and push to GitHub.
+
+== CONSTRAINTS ==
+
+- tc24r C subset: no structs, no malloc/free, no string library,
+  no varargs, single translation unit, 24-bit int, 8-bit char
+- All data structures must use parallel arrays or packed flat memory
+- UART I/O only (memory-mapped)
+- Assembler for low-level bootstrap and trampoline code
+- Keep static allocation limits reasonable
+- Educational clarity over cleverness
+
+== SIBLING REPOS FOR REFERENCE ==
+
+- ~/github/sw-embed/sw-cor24-assembler/ — same CLAUDE.md/agentrail
+  pattern to follow (native C project with saga)
+- ~/github/sw-embed/sw-cor24-script/ — the sws scripting language
+  (will run on top of this monitor)
+- ~/github/sw-embed/sw-cor24-x-tinyc/ — the cross C compiler
+- ~/github/sw-embed/sw-cor24-emulator/ — the emulator for testing
+- ~/github/sw-embed/sw-cor24-macrolisp/ — another C-based interpreter
+  (similar build pattern)

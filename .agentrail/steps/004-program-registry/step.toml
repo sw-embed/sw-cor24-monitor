@@ -1,0 +1,32 @@
+[step]
+name = "004-program-registry"
+status = "pending"
+prompt = """
+Implement the program registry — a table mapping program names to
+entry addresses, using parallel arrays (no structs).
+
+1. Define registry arrays in monitor.c:
+   - int prog_names[16]   — pointers to name strings
+   - int prog_entries[16]  — entry point addresses
+   - int prog_flags[16]    — flags (reserved for now)
+   - int prog_count        — number of registered programs
+
+2. Implement registry functions:
+   - mon_register(name, entry, flags): add to table, return index
+   - mon_find_program(name): linear scan, return index or -1
+   - mon_run_by_name(name): find + mon_run(entry)
+   - mon_list_programs(): print all registered program names
+
+3. Implement string helper:
+   - mon_strcmp(a, b): compare two strings, return 0 if equal
+
+4. Register demo programs in monitor_init():
+   - mon_register("echo", 0x2000, 0)
+   - mon_register("failtest", 0x3000, 0)
+
+5. Test:
+   - mon_find_program("echo") → 0 (found at index 0)
+   - mon_find_program("nonexistent") → -1
+   - mon_run_by_name("echo") → invokes program at 0x2000
+   - mon_list_programs() → prints "echo", "failtest"
+"""

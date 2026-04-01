@@ -1,0 +1,37 @@
+[step]
+name = "001-bootstrap-uart"
+status = "pending"
+prompt = """
+Create the monitor bootstrap and UART driver. This is the foundation
+that everything else builds on.
+
+1. Create src/boot.s — assembler bootstrap:
+   - Entry at address 0
+   - Set SP to 0xFEEC00 (top of 3K EBR populated area)
+   - Jump to C function _monitor_init
+
+2. Create src/monitor.c — initial C code:
+   - UART MMIO constants: IO_UARTDATA = 0xFF0100, IO_UARTSTAT = 0xFF0101
+   - uart_putchar(ch): poll TX busy (bit 7 of status), write to data reg
+   - uart_getchar(): poll RX ready (bit 0 of status), read from data reg
+   - uart_puts(str): loop calling uart_putchar
+   - monitor_init(): call uart_puts with boot banner, then halt/loop
+
+3. Create justfile (or scripts/build.sh):
+   - tc24r src/monitor.c → assembly output
+   - Assemble boot.s + monitor output → monitor.bin
+   - Run: cor24-run with monitor.bin at address 0
+
+4. Verify on emulator: boot → banner appears on UART output.
+
+Reference ISA details:
+- UART status bit 0 = RX ready, bit 7 = TX busy
+- UART data reg: write = TX, read = RX (auto-ack)
+- Stack grows downward, SP at r4
+- tc24r calling: push fp/r2/r1 prologue, jmp (r1) return
+
+Reference repos:
+- ~/github/sw-embed/sw-cor24-emulator/ (emulator, ISA)
+- ~/github/sw-embed/sw-cor24-x-tinyc/ (tc24r compiler)
+- ~/github/sw-embed/sw-cor24-x-assembler/ (cross assembler)
+"""

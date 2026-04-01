@@ -1,0 +1,52 @@
+[step]
+name = "005-sws-integration"
+status = "pending"
+prompt = """
+Integrate the monitor with sw-cor24-script (sws) as the UI shell,
+with a fallback minimal shell.
+
+1. Define the monitor ↔ sws interface:
+   - Monitor calls sws at 0x1000 as a regular program via mon_run
+   - sws uses service vector for I/O (putchar, getchar, etc.)
+   - When sws wants to run a program, it returns a "run request"
+     to the monitor (design the protocol: e.g., sws writes program
+     name to a shared buffer, returns a special RC like 0x100+
+     to signal "run this program", or returns 0 to signal "done/quit")
+   - After running the requested program, monitor stores RC in a
+     known location and calls sws again
+   - sws can read the last program's RC from the known location
+
+2. Implement the monitor main loop:
+   - If sws is present at 0x1000 (check for valid code):
+     a. Call sws via mon_run(0x1000)
+     b. If sws returns a run-request, extract program name
+     c. Run the requested program via mon_run_by_name
+     d. Store RC in shared location
+     e. Call sws again (goto a)
+     f. If sws returns 0 (quit), halt or restart
+   - If sws is not present:
+     a. Fall back to tiny built-in shell
+
+3. Implement fallback shell:
+   - Print "mon> " prompt
+   - Read line via svc_readline
+   - Parse: "run <name>" → mon_run_by_name(name)
+   - Parse: "list" → mon_list_programs()
+   - Parse: "help" → print available commands
+   - Print "rc=N" after each program invocation
+   - Loop
+
+4. Define shared memory locations:
+   - mon_last_rc: last program return code
+   - mon_run_request: buffer for program name from sws
+   - mon_status: monitor status/error code
+
+5. Test:
+   - Without sws: fallback shell works, "run echo" invokes echo
+   - With sws stub: monitor calls sws, sws requests "echo",
+     monitor runs echo, stores RC, calls sws again
+
+Note: sws is WIP in sw-cor24-script repo. Coordinate with that
+repo's development. Initially test with a stub sws or use the
+fallback shell.
+"""

@@ -1,0 +1,45 @@
+[step]
+name = "003-program-invocation"
+status = "pending"
+prompt = """
+Implement mon_run() — the core program invocation mechanism with
+return trampoline and RC capture.
+
+1. Implement mon_run(entry_addr) in monitor.c:
+   - Build context: a single word pointing to the service vector
+     table at 0x500 (no args yet)
+   - Save monitor's stack pointer to a known location
+   - Call assembler trampoline to invoke the program
+   - On return, capture RC from r0
+   - Return RC to caller
+
+2. Create trampoline in boot.s (or trampoline.s):
+   - mon_invoke_program(entry, ctx):
+     a. Save monitor SP to mon_saved_sp
+     b. Push address of mon_return_stub onto stack (so program's
+        "return" lands in the stub)
+     c. Push ctx as the program's first argument (on stack per
+        tc24r convention)
+     d. Jump to entry address
+   - mon_return_stub:
+     a. RC is in r0 (program's return value)
+     b. Store r0 to mon_last_rc
+     c. Restore SP from mon_saved_sp
+     d. Return to mon_run caller
+
+3. Implement svc_exit(rc):
+   - Store rc to mon_last_rc
+   - Restore SP from mon_saved_sp
+   - Jump to mon_run completion (same path as return stub)
+
+4. Create a test program at 0x2000:
+   - Simple C program compiled with tc24r, loaded at 0x2000
+   - Receives ctx, calls svc_putchar through vector to print "OK"
+   - Returns 0
+   - Build script loads it at 0x2000
+
+5. Test:
+   - mon_run(0x2000) → program prints "OK" → RC = 0
+   - A second test program that returns 42 → RC = 42
+   - A program that calls svc_exit(7) → RC = 7
+"""

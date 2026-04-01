@@ -1,0 +1,42 @@
+[step]
+name = "006-demo-dogfooding"
+status = "pending"
+prompt = """
+Create demo programs and validate the full end-to-end flow.
+
+1. Demo program: echo (at 0x2000)
+   - Receives ctx (service vector pointer)
+   - Calls svc_putchar through vector to print "hello world\n"
+   - Returns 0
+   - Compiled with tc24r, loaded separately by emulator
+
+2. Demo program: failtest (at 0x3000)
+   - Prints "something went wrong\n" via service vector
+   - Returns 12 (nonzero RC)
+
+3. Demo program: cat (at 0x4000)
+   - Reads chars via svc_getchar, echoes via svc_putchar
+   - Exits on 'q' character
+   - Returns 0
+
+4. Integration test script:
+   - Emulator loads monitor + all demos at correct addresses
+   - Monitor boots, falls back to built-in shell (or sws)
+   - Run echo → output appears, rc=0
+   - Run failtest → output appears, rc=12
+   - Run cat → interactive echo until 'q', rc=0
+   - Run nonexistent → error message
+
+5. Write docs/program-guide.md:
+   - How to write a program for the monitor
+   - Program entry convention (receives ctx → service vector)
+   - Available services (putchar, getchar, write, readline, exit)
+   - How to compile with tc24r and load at a slot address
+   - RC convention (0 = success, nonzero = error)
+
+6. Final validation:
+   - Multiple sequential program invocations work
+   - No state leakage between programs
+   - Service vector calls work correctly from all demos
+   - Monitor regains control cleanly after every program exit
+"""

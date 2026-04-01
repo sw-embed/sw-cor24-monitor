@@ -1,0 +1,2068 @@
+
+
+
+
+I want to build a multitasking simple educational OS on embedded COR24 ISA FPGA soft cpu or an emulator.   I have cross-compiler and cross-assembler to generate executable binaries that run from address 0.  I have interpreters and a VM that run on the emulator.   I have the ability to load binaries (library/functions) at specified addresses and call them from the main at 0.  I started on a shell/scripting language for navigating an emulated (for now) file system (RAM disk that could be created on a Mac/Linux host and pre-loaded at a specified address.  What is missing is a dispatcher.   The dispatcher could be loaded at zero, and call the shell/scripting program at 1000, that can interpret run command to run other programs loaded at 2000, 3000, etc.  Several of these will use the UART for input and ouput, so if they use a shared "runtime" (in the dispatcher image at location 500, e.g.,) then whenever a program calls the UART it could yield back to the dispatcher to dispatch another program (perhaps).  Simpler, the user types a command to the dispatcher to run program A, B, or C.  The selected program runs interactively via UART and eventually "exits" (back to the dispatcher, shell prompt).  How can I design this? The dispatcher can be written in C or assembler (other languages are available).
+
+You want a simple, educational multitasking OS design for COR24 that can run on either your FPGA soft CPU or emulator, starting from your current reality:
+
+binaries can be cross-built and loaded at fixed addresses
+
+the main image runs at address 0
+
+helper/runtime/library code can live at fixed addresses like 500
+
+shell/scripting can live at 1000
+
+user programs can live at 2000, 3000, etc.
+
+UART is the primary I/O path
+
+you do not yet have a dispatcher/scheduler
+
+So the core question is not “how do I build a full OS?” but rather:
+
+What is the smallest dispatcher architecture that fits COR24, supports interactive programs, and can later grow into cooperative and then preemptive multitasking?
+
+The best answer is: build this in layers, and do not start with “true multitasking” first.
+
+Recommended architecture
+For your machine and goals, I would strongly recommend this staged architecture:
+
+Stage 0: Monitor / Loader
+A tiny resident program at address 0 that can:
+
+initialize memory regions
+
+initialize UART
+
+load or locate preloaded programs
+
+jump to one selected program
+
+regain control when that program exits
+
+This is not yet an OS. It is a monitor.
+
+Stage 1: Dispatcher + system call ABI
+Turn the monitor into a dispatcher that owns:
+
+the UART
+
+program start/stop
+
+minimal process/task table
+
+memory map for fixed-address programs
+
+a trap/call interface for services
+
+This is still single foreground task, but with a proper kernel/user boundary.
+
+Stage 2: Cooperative multitasking
+Add multiple runnable tasks, each of which:
+
+has its own stack
+
+has its own saved registers/context
+
+explicitly yields
+
+blocks on events like UART input
+
+This is the first true useful OS phase.
+
+Stage 3: Event-driven console ownership
+Because multiple programs want the UART, add a policy:
+
+either one foreground console owner at a time
+
+or line-oriented routing through the dispatcher
+
+or background tasks with no direct UART read access
+
+This is where educational clarity matters most.
+
+Stage 4: Optional timer/preemption
+Only later add:
+
+timer tick in emulator
+
+or periodic interrupt in FPGA design
+
+round-robin preemption
+
+For your current setup, cooperative first is the correct design.
+
+High-level design choice
+There are really three candidate models.
+
+Option A: Simple monitor that runs one program at a time
+The dispatcher just runs shell, then shell runs one program, which returns to shell.
+
+Benefits
+easiest to implement
+
+easiest to debug
+
+minimal ABI
+
+no task switching yet
+
+Risks
+not really multitasking
+
+programs cannot overlap
+
+a blocking UART read blocks everything
+
+Verdict
+Excellent first milestone, but not the full answer.
+
+Option B: Cooperative multitasking kernel
+Programs call yield, read, write, exit, etc. through a runtime/API, and the dispatcher switches among runnable tasks.
+
+Benefits
+very educational
+
+easy to reason about
+
+no interrupt complexity needed
+
+fits emulator and FPGA
+
+can use UART service calls as natural yield points
+
+Risks
+one badly behaved task can starve others
+
+programs must cooperate
+
+ABI design matters
+
+Verdict
+This is the best next target.
+
+Option C: Preemptive multitasking kernel
+A timer interrupt saves context and switches tasks automatically.
+
+Benefits
+more “real OS”-like
+
+protects against non-yielding tasks
+
+closer to MVS-like dispatcher concepts
+
+Risks
+much harder
+
+requires reliable interrupt model
+
+reentrancy becomes an issue immediately
+
+much more kernel complexity around stacks and critical sections
+
+Verdict
+Do this later, not first.
+
+My recommendation
+Build:
+
+A dispatcher kernel at 0
+
+A system-call/runtime layer at 500
+
+A shell task at 1000
+
+User tasks at fixed addresses 2000, 3000, ...
+
+Cooperative scheduling only
+
+UART owned by the kernel
+
+Blocking read implemented as “task waits for input”
+
+That gives you a real educational OS with small, understandable pieces.
+
+Core design principle
+The biggest thing to avoid is letting every program “just touch UART directly.”
+
+If multiple programs can directly poll and emit to UART hardware, then:
+
+they will interleave output unpredictably
+
+input ownership becomes ambiguous
+
+later multitasking becomes messy
+
+later preemption becomes dangerous
+
+So the clean design is:
+
+Rule
+User programs never touch UART MMIO directly.
+They call kernel services instead.
+
+That single decision makes the rest tractable.
+
+Proposed memory layout
+A simple fixed layout could look like this:
+
+0x000000  kernel / dispatcher / monitor
+0x000200  kernel data
+0x000500  shared runtime / syscall stubs / common library
+0x001000  shell program
+0x002000  user program A
+0x003000  user program B
+0x004000  user program C
+...
+0x00F000  ram disk metadata
+0x010000  ram disk data
+...
+high memory downward: per-task stacks
+Adjust addresses to your actual constraints, but the important point is:
+
+kernel region is protected by convention
+
+each program gets a known code/data slot
+
+each task gets a separate stack region
+
+kernel owns a private stack too
+
+If later you add relocation, you can improve this. For now, fixed load addresses are fine.
+
+Minimal kernel responsibilities
+Your dispatcher kernel should initially do only these things:
+
+1. Boot and initialize
+zero kernel BSS
+
+set kernel stack
+
+init UART
+
+init task table
+
+register preloaded programs
+
+create the initial shell task
+
+2. Manage tasks
+create task
+
+start task
+
+save/restore task context
+
+mark task runnable / waiting / exited
+
+3. Provide system services
+yield
+
+exit
+
+write_uart
+
+read_uart
+
+maybe spawn
+
+maybe sleep later
+
+4. Run scheduler
+round-robin across runnable tasks
+
+That is enough.
+
+Task model
+A task should have a Task Control Block.
+
+Suggested TCB fields
+struct task {
+    int pid;
+    int state;          // EMPTY, RUNNABLE, WAIT_INPUT, EXITED
+    uint24 pc;
+    uint24 sp;
+    uint24 fp;
+    uint24 r0;
+    uint24 r1;
+    uint24 r2;
+    uint24 iv;
+    uint24 ir;          // if meaningful in saved context
+    uint24 entry;
+    uint24 stack_base;
+    uint24 stack_limit;
+    uint24 program_base;
+    uint24 program_end;
+    int exit_code;
+    int wait_reason;
+    int console_owner;  // optional
+};
+You may not need every register, depending on your ABI and context switch scheme. But conceptually, a task needs:
+
+saved CPU registers
+
+saved stack pointer/frame pointer
+
+state
+
+memory ownership metadata
+
+wait metadata
+
+If your CPU always has architectural registers r0..r7, save whatever is not constant/derived.
+
+Since z is constant zero, no need to save it.
+
+State machine
+Keep it simple:
+
+EMPTY
+READY/RUNNABLE
+RUNNING
+WAIT_INPUT
+WAIT_CHILD     (optional later)
+SLEEPING       (optional later)
+EXITED
+Initially you really only need:
+
+RUNNABLE
+
+WAIT_INPUT
+
+EXITED
+
+Scheduling model
+Use round-robin cooperative scheduling.
+
+Basic rule
+A task switch occurs only when:
+
+task calls yield
+
+task calls blocking read
+
+task calls exit
+
+task faults
+
+optional: after certain kernel services complete
+
+Scheduler loop
+Pseudo-logic:
+
+loop forever:
+    check for UART input and wake any waiter
+    choose next RUNNABLE task
+    if none runnable:
+        idle / poll UART
+    else:
+        switch to task
+        run until syscall/exit/fault
+This can be implemented in one of two ways.
+
+Two implementation styles for syscalls
+Style 1: Call-based kernel entry
+Programs call fixed runtime stubs at 500, which then jump to kernel entry points.
+
+Example:
+
+user code -> runtime stub -> kernel service -> scheduler maybe -> return
+This is simplest if you do not yet have trap instructions.
+
+Pros
+easy
+
+works with your current fixed-address setup
+
+no special hardware support needed
+
+Cons
+user code is not really isolated
+
+buggy code can jump anywhere
+
+For an educational OS, this is acceptable.
+
+Style 2: Software interrupt / trap
+If you can support a software trap convention, this is cleaner.
+
+Example:
+
+put syscall number in r0
+
+arguments in r1, r2, stack
+
+execute a reserved instruction or branch vector
+
+kernel dispatches service
+
+Pros
+more OS-like
+
+cleaner ABI
+
+easier later to evolve
+
+Cons
+more machinery if COR24 has no direct trap support
+
+For now, Style 1 is fine.
+
+Recommended syscall ABI
+Make the ABI tiny and stable.
+
+Example syscall numbers
+0  yield
+1  exit
+2  write_char
+3  write_buf
+4  read_char
+5  spawn
+6  wait_pid     (later)
+7  get_pid      (later)
+8  sleep_ticks  (later)
+Calling convention suggestion
+Since COR24 is small, use a simple convention:
+
+r0 = syscall number or return code
+
+r1 = arg1
+
+r2 = arg2
+
+additional args on stack if needed
+
+Return:
+
+r0 = result / status
+
+r1 optional secondary result
+
+You want this ABI to work from:
+
+C
+
+assembler
+
+maybe later Lisp/Forth/VM runtimes
+
+So keep it very plain.
+
+UART design
+This is the most important subsystem early on.
+
+You mentioned that UART service points could be yield points. That is exactly right.
+
+Kernel UART ownership model
+Write path
+User task calls:
+
+os_putchar(ch);
+os_write(buf, len);
+The kernel:
+
+writes the character(s) to UART
+
+may spin/poll until TX ready
+
+may yield between characters if you want fairness
+
+Initially, simplest is synchronous write in kernel.
+
+Read path
+User task calls:
+
+ch = os_getchar();
+If a char is already available:
+
+return it immediately
+
+If not:
+
+mark task WAIT_INPUT
+
+schedule another task
+
+When kernel later sees UART RX ready:
+
+read char
+
+deliver it to one waiting task
+
+mark that task RUNNABLE
+
+That is your first real blocked-wait mechanism.
+
+Console input policy
+This needs an explicit design choice.
+
+If multiple tasks all want interactive input, what happens?
+
+Best initial policy: single foreground console owner
+Only one task at a time is allowed to read from console input.
+
+shell starts as foreground owner
+
+when shell launches program A in foreground, A becomes console owner
+
+background tasks may write output optionally, but should not read input
+
+when A exits, control returns to shell
+
+This is the simplest useful model.
+
+Why this helps
+Without this rule, if A and B both call read_char, who gets the user keystroke? The answer becomes confusing immediately.
+
+So start with:
+
+foreground task can read console
+
+background tasks cannot read console
+
+shell can later support run foo & but those background tasks must be non-interactive
+
+That is very Unix-like and very teachable.
+
+Shell design in this system
+Your shell should just be another task, not special, except perhaps as pid 1 or “init.”
+
+Shell responsibilities
+read command line
+
+parse command
+
+ask kernel to spawn program
+
+optionally wait for foreground child
+
+print prompt again
+
+Example commands
+run A
+
+run B
+
+run C
+
+ps
+
+yieldtest
+
+kill 2 later
+
+fg 2 later
+
+help
+
+At first:
+
+foreground only
+
+one child at a time is enough
+
+Later:
+
+add background launch
+
+add task list
+
+add cooperative daemon tasks
+
+Spawn model
+Because your binaries are fixed-address and preloaded, spawn is simple.
+
+You are not yet loading from a filesystem image dynamically into arbitrary RAM. So spawn("progA") can just mean:
+
+look up a table entry:
+
+"shell" -> 0x1000
+
+"progA" -> 0x2000
+
+"progB" -> 0x3000
+
+allocate a stack
+
+initialize a TCB
+
+set PC to entry address
+
+set SP to stack top
+
+mark RUNNABLE
+
+That is enough for a long time.
+
+Important simplification
+Do not allow multiple simultaneous instances of the same fixed-address image unless you separate code from writable data.
+
+Because if program A at 0x2000 contains mutable globals in that region, two instances would stomp each other.
+
+So early rule:
+
+one loaded image = one runnable instance
+
+Later, if you want multiple instances:
+
+split code and data
+
+or copy the image to per-instance memory
+
+or position-independent code + relocatable data
+
+But not yet.
+
+Per-task stack setup
+Each task needs its own stack. This is non-negotiable.
+
+A simple scheme:
+
+Task 0 kernel stack:   high mem region K
+Task 1 shell stack:    high mem region S1
+Task 2 progA stack:    high mem region S2
+Task 3 progB stack:    high mem region S3
+...
+When spawning:
+
+choose unused stack slot
+
+initialize initial stack frame so a context restore enters task entry
+
+when task exits, reclaim stack slot
+
+If writing in assembler, the easiest trick is often:
+
+synthesize a saved-context frame on the stack
+
+context switch “returns” into the task entry point
+
+Context switch design
+This is the heart of the dispatcher.
+
+Minimal cooperative context switch
+When a task yields or blocks:
+
+save current registers into current TCB
+
+save SP/FP/PC
+
+mark state
+
+choose next task
+
+load next task registers
+
+restore SP/FP/PC
+
+resume next task
+
+Depending on your architecture, saving PC may happen as part of a call/return protocol, or you may need an explicit switch routine.
+
+Practical recommendation
+Implement the low-level switch in assembler, even if the rest of kernel is in C.
+
+Why:
+
+precise register control
+
+easier to reason about stack frame shape
+
+compiler won’t surprise you
+
+Then keep the scheduler logic in C if you want.
+
+That hybrid is ideal.
+
+C vs assembler for the dispatcher
+You asked whether dispatcher should be C or assembler.
+
+Best answer
+Use assembler for the context switch and bootstrap, and C for the policy logic.
+
+Put in assembler
+reset/startup entry
+
+kernel stack setup
+
+first task launch
+
+ctx_switch(old_tcb, new_tcb)
+
+maybe syscall entry veneer
+
+Put in C
+task table management
+
+scheduler selection
+
+spawn logic
+
+shell-facing APIs
+
+UART queue/poll logic
+
+process state machine
+
+Why this split is good
+keeps hard machine-specific code tiny
+
+keeps most code readable and testable
+
+lets you evolve the kernel more quickly
+
+If your C compiler is mature enough, this is the best balance.
+
+If not, write the whole first dispatcher in assembler and later port policy code to C.
+
+Runtime/shared library at 500
+Your shared runtime at 500 is a very good idea.
+
+It should provide the stable API user programs call.
+
+Suggested runtime contents
+os_yield()
+
+os_exit(int rc)
+
+os_putchar(int ch)
+
+os_getchar()
+
+os_write(const char *buf, int len)
+
+os_spawn(const char *name) maybe later
+
+crt0-style entry/exit glue if needed
+
+This gives user programs a standard interface and lets you change kernel internals later.
+
+Very important
+This runtime should be the only supported way for user code to talk to the dispatcher.
+
+Even if direct kernel jumps are possible, document them as unsupported.
+
+What “yield on UART” should mean
+You suggested that whenever a program calls UART through shared runtime, it could yield to dispatcher.
+
+That is a good instinct, but refine it slightly.
+
+Better rule
+For write:
+kernel handles write immediately
+
+optional: after N chars, scheduler may rotate to another task
+
+optional: explicit yield after line output
+
+For read:
+if no char available, block task and switch away
+
+So not every UART call must yield. Instead:
+
+blocking input definitely yields
+
+output may or may not yield depending on policy
+
+If every putchar yields, terminal output gets very fragmented and slow.
+
+A good first rule is:
+
+write is synchronous
+
+read blocks
+
+Later:
+
+add buffered output
+
+optionally timeslice output
+
+What a minimal dispatcher loop could look like
+Conceptually:
+
+boot:
+    init hardware
+    init kernel data
+    create shell task
+    enter scheduler
+
+scheduler:
+    poll devices
+    wake blocked tasks if events available
+    find next runnable task
+    if none:
+        idle loop
+        goto scheduler
+    switch to chosen task
+
+task calls os_read_char:
+    if input available:
+        return char
+    else:
+        mark current WAIT_INPUT
+        switch to scheduler
+
+task calls os_exit:
+    mark current EXITED
+    release resources
+    switch to scheduler
+
+task calls os_yield:
+    mark current RUNNABLE
+    switch to scheduler
+That is the system.
+
+Fault handling
+You will want at least a primitive fault path from day one.
+
+If a task:
+branches to nonsense
+
+corrupts stack
+
+calls invalid syscall
+
+overruns memory visibly
+
+then the kernel should:
+
+print a diagnostic to UART
+
+mark task EXITED or FAULTED
+
+return control to shell if possible
+
+Even if crude, this makes the system much easier to use.
+
+Add a task state
+FAULTED
+
+and track:
+
+fault PC
+
+reason code
+
+This is educational gold.
+
+Filesystem question
+You mentioned the shell/scripting language navigates an emulated filesystem, initially RAM disk preloaded at a fixed address.
+
+That is fine, but for the dispatcher phase, keep filesystem involvement minimal.
+
+Recommendation
+Separate these two concerns:
+
+Kernel phase 1
+Kernel does not load executables from filesystem.
+It only starts programs from a pre-registered program table.
+
+Shell phase 1
+Shell can read filesystem for scripts/data.
+
+Later
+Add exec/load that reads a file from RAM disk into an executable slot.
+
+This avoids mixing:
+
+scheduler complexity
+
+loader complexity
+
+filesystem complexity
+
+all at once.
+
+Suggested first milestones
+Here is the path I would take.
+
+Milestone 1: foreground-only monitor
+kernel at 0
+
+shell at 1000
+
+run A jumps to A at 2000
+
+A calls exit
+
+returns to shell
+
+No multitasking yet.
+
+Milestone 2: syscall/runtime layer
+programs use os_putchar, os_getchar, os_exit
+
+no direct UART from apps
+
+shell and apps share same API
+
+This is the key cleanup milestone.
+
+Milestone 3: cooperative scheduler
+create shell as task 1
+
+create idle task 0 or special idle loop
+
+allow shell to spawn one background ticker task
+
+scheduler round-robins
+
+blocked read_char yields to others
+
+At this point you have a real multitasking OS.
+
+Milestone 4: foreground/background console policy
+only one task reads console
+
+shell can run foreground or background
+
+add ps
+
+Milestone 5: timers/sleep
+emulator tick counter
+
+sleep(n) blocks task until tick deadline
+
+Milestone 6: dynamic loading from RAM disk
+filesystem-backed program load into free slots
+
+eventually overlays or relocation
+
+Educational design guidance
+Because this is an educational OS, clarity matters more than cleverness.
+
+Prefer visible, explicit mechanisms
+Good:
+
+fixed task table
+
+fixed load addresses
+
+explicit task states
+
+explicit foreground console owner
+
+cooperative yield
+
+Avoid early:
+
+paging
+
+demand loading
+
+implicit reentrancy
+
+fancy protection
+
+complex linker/relocator
+
+full multiuser semantics
+
+You can add sophistication later, but the first version should be explainable on one whiteboard.
+
+A concrete starting architecture
+Here is the design I would actually build.
+
+Kernel image at 0 contains
+boot/startup
+
+scheduler
+
+UART driver
+
+task table
+
+syscall dispatcher
+
+idle loop
+
+program registry
+
+Runtime at 500 contains
+user-callable syscall wrappers
+
+common C runtime glue
+
+Shell at 1000
+line input
+
+command parser
+
+spawn foreground program
+
+later spawn background
+
+Programs at fixed addresses
+A at 2000
+
+B at 3000
+
+C at 4000
+
+Kernel program registry
+Something like:
+
+struct program_def {
+    const char *name;
+    uint24 entry;
+    uint24 base;
+    uint24 end;
+    int flags;   // interactive, singleton, etc.
+};
+This is simple and works now.
+
+Example behavior model
+Boot
+Kernel creates shell task and starts scheduling.
+
+Shell prompt
+User sees:
+
+swos> 
+User enters
+run A
+Shell asks kernel to spawn A as foreground.
+
+Kernel:
+
+creates task for A
+
+assigns console ownership to A
+
+marks shell as waiting for child, or just blocked
+
+schedules A
+
+A runs
+A uses os_getchar, os_putchar, etc.
+
+A exits
+Kernel marks A EXITED.
+Kernel restores console ownership to shell.
+Shell becomes runnable again and prints prompt.
+
+This gives a very clean interactive model.
+
+Background tasks
+Once foreground works, add:
+
+run ticker &
+run logger &
+ps
+These background tasks:
+
+may write output, though ideally controlled
+
+may not read console
+
+must yield or block
+
+A classic educational demo is a task that prints a dot every N cycles or after sleep.
+
+Important warning about shared runtime state
+If the runtime at 500 has writable globals, you must be careful.
+
+For example, if runtime contains:
+
+input buffers
+
+string formatting state
+
+errno-like globals
+
+then all tasks will share them, which may be wrong.
+
+Recommendation
+Keep the shared runtime almost entirely stateless.
+
+Good:
+
+thin syscall stubs
+
+pure helper functions
+
+Be careful with:
+
+static buffers
+
+global temporary formatting state
+
+If needed, move per-task runtime state into the TCB or task-local area later.
+
+What is still missing after this design?
+Even with the above, you will still not yet have:
+
+memory protection
+
+relocatable executables
+
+multiple instances of same program image
+
+true asynchronous I/O
+
+preemption
+
+signals
+
+pipes
+
+device-independent VFS
+
+user/kernel privilege separation
+
+That is okay. None of those are needed for your first educational OS.
+
+Best implementation order
+Step 1
+Define the syscall/runtime ABI on paper.
+
+Do this first, before writing more code.
+
+Step 2
+Write the assembler context switch and kernel bootstrap.
+
+Step 3
+Write the kernel task table and scheduler in C.
+
+Step 4
+Port shell to use only runtime services, no direct UART.
+
+Step 5
+Port one small demo app to same ABI.
+
+Step 6
+Implement yield, read_char, write_char, exit.
+
+Step 7
+Implement shell command run A.
+
+Step 8
+Add a second demo app and round-robin cooperative switching.
+
+That sequence minimizes thrash.
+
+Suggested first demo tasks
+To validate the dispatcher, build these:
+
+Demo 1: echo
+Foreground task:
+
+reads chars
+
+echoes until q
+
+exits
+
+Tests:
+
+blocking read
+
+console ownership
+
+exit path
+
+Demo 2: ticker
+Background task:
+
+yields in a loop
+
+occasionally prints .
+
+Tests:
+
+cooperative scheduling
+
+Demo 3: counter
+Background task:
+
+increments a counter
+
+prints every N loops
+
+yields often
+
+Tests:
+
+fairness and state persistence
+
+Demo 4: script shell
+Shell task:
+
+parses run echo
+
+parses run ticker &
+
+ps
+
+Tests:
+
+actual OS usage flow
+
+Final recommendation
+Yes, the dispatcher should live at address 0, and yes, the shell can live at 1000, with apps at 2000+. But the key architectural decision is this:
+
+Build a cooperative kernel with kernel-owned UART and syscall stubs
+not
+
+“a dispatcher that just jumps between programs that directly use UART.”
+That one choice gives you:
+
+a clean scheduler model
+
+clean shell/app interaction
+
+a natural blocked-read mechanism
+
+a straightforward path to background tasks
+
+a future path to timer-based preemption
+
+Concrete answer in one sentence
+Write a tiny kernel/dispatcher at 0, keep the low-level context switch in assembler, put scheduler/task logic in C, make UART a kernel service behind runtime stubs at 500, run shell as task 1 at 1000, run apps as cooperative tasks at fixed addresses with separate stacks, and start with foreground-console ownership plus blocked read as your first true multitasking mechanism.
+
+If you want, I can turn this into a small COR24 OS design document with:
+
+memory map
+
+TCB layout
+
+syscall ABI
+
+scheduler pseudocode
+
+shell/app execution flow
+
+first 5 implementation milestones
+
+
+Okay, got it.  This is a monitor and I do not plan to turn this mechanism into an OS per se.  I actually want this to be like a Service Processor and Terminal multiplexor/controller layer.  the real multitasking O/S could be other FPGA or RVI32 MCUs running emulators that run each task on its own CPU, sharing one terminal via the COR24 front-end.  These other FPGAs/MCUs would have clocks, I/O devices, and the ability to run an RTOS.  I envision having system code run on its own CPU and user/app code run on its own CPU and provide cross system services.  But I am getting ahead of myself.  The short term goal is to develop, test, and dogfood my own scripting language that can run a program, passing args, and get back a RC.  The montitor would be the only UART HW using code.  Other Apps would call I/O functions that buffer/share the real UART.
+
+That reframes the problem in a very good way.
+
+You are not really building an embedded multitasking OS here. You are building a:
+
+monitor / service processor / terminal controller
+that
+
+owns the real UART hardware
+
+provides a stable call interface to loaded programs
+
+can launch a program with arguments
+
+can collect an RC on return
+
+can buffer or serialize I/O on behalf of those programs
+
+serves as the place where your scripting language is developed and dogfooded
+
+That is a much tighter and cleaner target.
+
+Restated short-term goal
+Your near-term system should do this well:
+
+monitor boots at 0
+
+monitor initializes UART and shared runtime
+
+monitor runs your scripting shell
+
+shell can invoke a loaded program with args
+
+program uses monitor-owned I/O calls rather than direct UART MMIO
+
+program returns an RC
+
+shell/script can inspect RC and continue
+
+That is a very reasonable architecture, and it is actually better than prematurely adding a dispatcher.
+
+High-level design
+Given this revised goal, I would now recommend not starting with task switching at all.
+
+Instead, structure the system as:
+
+Layer 1: Monitor / service processor
+Resident at low memory. Owns:
+
+UART hardware
+
+command dispatch
+
+program registry
+
+call gate / ABI
+
+argument passing
+
+return code collection
+
+shared buffers
+
+optional logging / tracing
+
+Layer 2: Runtime / service library
+Callable by apps. Provides:
+
+putchar / getchar / write / read_line
+
+argc / argv access
+
+exit(rc)
+
+optional environment/query functions
+
+optional file-like access to preloaded RAM structures later
+
+Layer 3: Shell / scripting language
+Runs as a regular loaded program, but typically the main foreground one.
+
+Layer 4: Applications / tools
+Loaded at fixed addresses and invoked by the shell through the monitor ABI.
+
+What changes from the earlier design
+The important shift is this:
+
+Before
+I was treating your design like a future cooperative scheduler.
+
+Now
+I would treat it as a synchronous call-and-return execution environment with monitor-mediated I/O.
+
+So the execution model becomes:
+
+monitor
+  -> shell
+      -> run program X with args
+          -> X calls monitor I/O services
+          -> X exits with RC
+      -> shell sees RC
+  -> back to prompt / next script statement
+That is much simpler, and it matches your dogfooding goal better.
+
+Core architectural rule
+This should now be the main rule:
+
+Only the monitor touches UART hardware.
+Everything else calls monitor services.
+
+That gives you:
+
+one place to debug terminal behavior
+
+one place to add buffering
+
+one place to add future multiplexing
+
+one place to redirect output later to other CPUs, consoles, or logs
+
+This is exactly the right rule for a service-processor-style front end.
+
+Recommended execution model
+You want something closer to a subroutine/program invocation monitor than a process scheduler.
+
+So the fundamental operation is:
+
+run(program, argv) -> rc
+This should be your first-class primitive.
+
+That means your shell language should not “jump to code” directly. Instead it should call a monitor entry like:
+
+rc = mon_run(program_id_or_name, argv_ptr)
+The monitor then:
+
+validates the program
+
+prepares an invocation context
+
+sets up argument passing
+
+transfers control
+
+regains control on exit
+
+stores return code in a standard place
+
+returns RC to caller
+
+This is much closer to what you want.
+
+Suggested monitor responsibilities
+The monitor should now own these services:
+
+Program invocation
+locate program by ID/name
+
+check whether it is callable
+
+set up stack/entry state
+
+call into it
+
+catch its return/exit
+
+Argument passing
+pass argc/argv
+
+or pass a command tail / single string
+
+or both
+
+Return code handling
+capture integer RC
+
+make available as $rc or equivalent in shell
+
+I/O services
+output char/string/buffer
+
+input char/line
+
+flush
+
+possibly prompt editing later
+
+Optional diagnostics
+trace program entry/exit
+
+print fault info
+
+record last RC / last error
+
+Do not overcomplicate the I/O model yet
+Because you are not doing real multitasking here yet, you do not need a fancy buffering architecture immediately.
+
+Start with a very simple model:
+
+For output
+Apps call:
+
+mon_putchar(ch)
+
+mon_write(ptr, len)
+
+maybe mon_puts(ptr)
+
+The monitor writes directly to UART.
+
+For input
+Apps call:
+
+mon_getchar()
+
+maybe mon_readline(buf, max)
+
+The monitor reads directly from UART.
+
+This is synchronous and blocking, and that is perfectly okay for now.
+
+The important thing is not buffering sophistication. The important thing is that the app calls the monitor instead of UART MMIO directly.
+
+ABI design
+This is now the most important part.
+
+Because your system is intended to host:
+
+shell/scripting
+
+C programs
+
+assembler programs
+
+maybe interpreters and VMs
+
+you want a small, stable invocation ABI and a small, stable monitor service ABI.
+
+ABI 1: Program entry
+Every callable program should have a standard entry convention.
+
+You have a few options.
+
+Option A: C-like
+int main(int argc, char **argv);
+Benefits
+familiar
+
+works naturally with your C compiler
+
+script runner can construct argv
+
+Risks
+requires pointer-to-pointer conventions
+
+a little more setup work in monitor
+
+Option B: command-tail style
+int main(char *cmdline);
+Benefits
+simple
+
+easy for script language
+
+easy for tiny systems
+
+Risks
+harder for programs to parse cleanly
+
+less structured
+
+Option C: both
+Pass a pointer to an invocation block:
+
+struct mon_invocation {
+    int argc;
+    char **argv;
+    char *cmdline;
+    int stdin_handle;
+    int stdout_handle;
+    int stderr_handle;
+    ...
+};
+int main(struct mon_invocation *inv);
+Benefits
+extensible
+
+future-friendly
+
+easy to add metadata later
+
+Risks
+slightly more machinery
+
+Recommendation
+For your educational and extensible goals, I would strongly favor:
+
+an invocation block
+even if the first version only contains argc, argv, and cmdline.
+
+That keeps you from painting yourself into a corner.
+
+Example invocation block
+Something conceptually like:
+
+struct mon_invocation {
+    uint24 magic;
+    int argc;
+    char **argv;
+    char *cmdline;
+    int rc;
+    int flags;
+    void *reserved0;
+    void *reserved1;
+};
+The monitor creates it, passes a pointer to the program, and the program returns an integer RC.
+
+You can later add:
+
+I/O channel IDs
+
+environment block
+
+caller PID/CPU/node
+
+tracing flags
+
+service vector pointer
+
+without changing the basic entry pattern.
+
+ABI 2: Monitor services
+You need a second ABI for programs calling back into the monitor.
+
+Best design choice
+Use a service vector table.
+
+That means the monitor exposes a table of function pointers or known entry addresses, such as:
+
+mon_services:
+  0 = putchar
+  1 = getchar
+  2 = write
+  3 = readline
+  4 = exit
+  5 = get_argc
+  6 = get_argv
+  7 = get_cmdline
+Or in C terms:
+
+struct mon_services {
+    int  (*putchar)(int ch);
+    int  (*getchar)(void);
+    int  (*write)(const void *buf, int len);
+    int  (*readline)(char *buf, int max);
+    void (*exit)(int rc);
+};
+The program gets passed a pointer to this table, either:
+
+in a register at entry, or
+
+inside the invocation block
+
+Why this is the best approach
+It decouples:
+
+program code
+
+runtime stubs
+
+absolute addresses
+
+You can move monitor internals later without changing every app.
+
+Recommended entry signature
+A very good shape would be:
+
+int main(struct mon_invocation *inv, struct mon_services *svc);
+or, if two arguments is awkward:
+
+struct mon_context {
+    struct mon_invocation *inv;
+    struct mon_services *svc;
+};
+int main(struct mon_context *ctx);
+That gives every program:
+
+its arguments
+
+its service calls
+
+its future extensibility hook
+
+This is cleaner than hard-wiring every service at fixed address 500.
+
+You can still place the vector at 500, but conceptually it should be a context/service table, not just a bag of raw helper code.
+
+Return-code model
+This part should be explicit and simple.
+
+Program completion rules
+A program may finish by either:
+
+returning from main
+
+calling svc->exit(rc)
+
+The monitor should normalize both to a single RC path.
+
+So internally:
+
+returned value becomes program RC
+
+exit(rc) also becomes program RC
+
+The shell then receives the RC and stores it in its own standard variable, for example $rc.
+
+That matches your scripting-language plans very nicely.
+
+Recommended shell contract
+Your shell/scripting language should treat program invocation as an expression or command with a status result.
+
+Examples conceptually:
+
+run echo hello world
+if eq $rc 0 { ... }
+
+set x = run foo a b c
+if ne $rc 0 { ... }
+or
+
+foo a b c
+if exists? $rc && ne $rc 0 { ... }
+The critical thing is that the shell need not know low-level details. It simply asks the monitor:
+
+run this named program
+
+with these args
+
+and give me the RC
+
+Program registry
+Since your programs are preloaded at fixed addresses, you should maintain a registry in the monitor.
+
+Something like:
+
+struct mon_program {
+    const char *name;
+    uint24 entry;
+    uint24 base;
+    uint24 end;
+    uint24 flags;
+};
+Possible flags:
+
+callable
+
+interactive
+
+singleton
+
+privileged
+
+script
+
+VM
+
+interpreter
+
+Then the shell says run foo, and monitor resolves "foo" to the program definition.
+
+This is much better than shell hardcoding addresses.
+
+Error handling
+You should distinguish three cases:
+
+1. Program RC
+The program ran and returned a legitimate code:
+
+0
+
+nonzero application RC
+
+2. Monitor invocation failure
+The monitor could not even invoke the program:
+
+no such program
+
+bad argv block
+
+invalid entry address
+
+This should probably set a monitor-level error and perhaps return a reserved RC, like 255 or -1, depending on your conventions.
+
+3. Program fault
+Program crashed or violated call convention:
+
+bad jump
+
+corrupted stack
+
+illegal service usage
+
+The monitor should report a separate fault condition and map it to a conventional RC.
+
+Recommendation
+Keep both:
+
+a visible RC
+
+a separate monitor diagnostic state
+
+So shell can inspect:
+
+$rc
+
+maybe later $fault or $status
+
+Where buffering fits
+You said “Other Apps would call I/O functions that buffer/share the real UART.”
+
+That is the right long-term direction, but there are two levels of buffering.
+
+Level 1: API mediation
+Only the monitor owns UART; apps use monitor I/O functions.
+
+This is mandatory now.
+
+Level 2: internal buffering
+Monitor keeps RX/TX ring buffers, line buffers, per-client buffers, output arbitration.
+
+This is optional now.
+
+Recommendation
+Start with Level 1 only.
+
+Later add:
+
+a line input buffer for shell editing
+
+a TX buffering layer if you want smoother future multiplexing
+
+source tagging if you want prefixed output like [cpu2] hello
+
+But that can wait.
+
+Call model: direct call vs trampoline
+You have two ways the monitor can invoke a program.
+
+Option A: direct call like a subroutine
+Monitor sets up args and does a call/jump to entry. Program returns naturally.
+
+Benefits
+simplest
+
+easy for C
+
+easy to debug
+
+Risks
+requires program to obey return discipline
+
+Option B: trampoline frame
+Monitor creates an artificial frame so that if the program returns, it lands in a known monitor reentry stub.
+
+Benefits
+more robust
+
+monitor always regains control cleanly
+
+Risks
+a little more setup
+
+Recommendation
+Use a trampoline return stub even if you also support normal return.
+
+That way:
+
+if main returns, control goes to a monitor stub that captures the RC
+
+if svc->exit(rc) is called, it also routes to same completion path
+
+This gives you a single completion mechanism.
+
+Suggested monitor control flow
+Conceptually:
+
+Boot
+init UART
+
+init monitor data
+
+register programs
+
+invoke shell
+
+Shell requests run
+parse args
+
+build invocation block
+
+call mon_run("prog", argv)
+
+monitor resolves program
+
+monitor invokes program
+
+monitor captures RC
+
+returns RC to shell
+
+Shell continues
+store $rc
+
+evaluate script logic
+
+prompt again or continue script
+
+That is all you need right now.
+
+What not to build yet
+Since this is not the OS proper, I would avoid these for now:
+
+Avoid
+task scheduler
+
+cooperative yield
+
+background jobs
+
+shared console arbitration among concurrent tasks
+
+preemption
+
+complex per-program I/O queues
+
+dynamic relocatable loading
+
+kernel/user separation mechanisms
+
+All of those may matter later in the bigger multiprocessor system. But for dogfooding the shell and monitor ABI, they are distractions.
+
+Best implementation language split
+Given your tools and goals:
+
+In assembler
+reset/start
+
+monitor entry glue
+
+program invocation trampoline
+
+return stub
+
+maybe service-vector low-level veneers
+
+In C
+monitor registry
+
+mon_run
+
+argv/cmdline building
+
+shell integration
+
+string parsing
+
+monitor diagnostics
+
+That is probably the cleanest split.
+
+If you prefer, the whole first version can be in C with a tiny assembler bootstrap, but I would still keep the entry/return trampoline in assembler.
+
+Concrete recommended interfaces
+Here is the shape I would aim for.
+
+Monitor-side program definition
+struct mon_program {
+    const char *name;
+    int (*entry)(struct mon_context *ctx);
+    uint24 base;
+    uint24 end;
+    uint24 flags;
+};
+Invocation context
+struct mon_context {
+    struct mon_invocation *inv;
+    struct mon_services *svc;
+};
+Invocation block
+struct mon_invocation {
+    int argc;
+    char **argv;
+    char *cmdline;
+    int last_error;
+    int flags;
+};
+Services
+struct mon_services {
+    int  (*putchar)(int ch);
+    int  (*getchar)(void);
+    int  (*write)(const char *buf, int len);
+    int  (*readline)(char *buf, int max);
+    void (*exit)(int rc);
+};
+Program entry
+int prog_main(struct mon_context *ctx);
+That is small, clear, and expandable.
+
+Relationship to your future multi-CPU vision
+This monitor design fits that future surprisingly well.
+
+Today:
+
+local program entry points are fixed memory addresses
+
+Later:
+
+a “program” may actually mean “send request to CPU #3 to run subsystem X”
+
+I/O still routes through the monitor
+
+RC still comes back through the same abstraction
+
+In other words, if you define mon_run() well now, later it can invoke:
+
+local binary
+
+VM task
+
+remote MCU/FPGA service
+
+RTOS-hosted subsystem
+
+without changing the shell language much.
+
+That is a strong reason to keep the shell talking to a logical program registry, not raw addresses.
+
+Best next milestone
+I would make the next milestone extremely narrow:
+
+Milestone 1: synchronous monitored program call
+Implement:
+
+monitor at 0
+
+service vector
+
+shell as caller
+
+one demo program
+
+argv passing
+
+RC return
+
+monitor-owned UART I/O only
+
+Demo flow
+shell> run echo one two three
+one two three
+rc=0
+Then:
+
+shell> run failtest
+something went wrong
+rc=12
+That validates:
+
+naming
+
+invocation
+
+args
+
+monitor I/O
+
+RC propagation
+
+That is enough to start dogfooding the shell.
+
+Suggested second milestone
+Milestone 2: script-visible RC and existence tests
+Once monitored invocation works, integrate it into your shell semantics so you can do:
+
+run foo a b c
+if eq $rc 0 {
+  say ok
+} else {
+  say failed
+}
+That is the dogfooding point.
+
+Final recommendation
+Given your clarified goal, I would now describe the design this way:
+
+Build a resident COR24 monitor that acts as a service processor and terminal controller, with a stable program-invocation ABI and service-vector-based I/O API. Use synchronous call/return execution, monitor-owned UART only, structured argument passing, and explicit RC capture. Do not add scheduling yet.
+That gives you the shortest path to:
+
+testing your scripting language
+
+standardizing program invocation
+
+centralizing UART handling
+
+preparing for later multi-CPU terminal multiplexing
+
+If you want, I can next turn this into a concrete mini-spec with:
+
+memory map
+
+structs
+
+monitor ABI
+
+program entry ABI
+
+shell run semantics
+
+RC conventions
+
+assembler/C split
+
+first demo program and test plan
+
+
+
+
