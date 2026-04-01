@@ -1,17 +1,19 @@
 number = 6
 slug = "demo-dogfooding"
-status = "pending"
+status = "in-progress"
 description = """
 Create demo programs and validate the full end-to-end flow.
 
 1. Demo program: echo (at 0x2000)
    - Receives ctx (service vector pointer)
-   - Calls svc_putchar through vector to print "hello world\n"
+   - Calls svc_putchar through vector to print "hello world
+"
    - Returns 0
    - Compiled with tc24r, loaded separately by emulator
 
 2. Demo program: failtest (at 0x3000)
-   - Prints "something went wrong\n" via service vector
+   - Prints "something went wrong
+" via service vector
    - Returns 12 (nonzero RC)
 
 3. Demo program: cat (at 0x4000)

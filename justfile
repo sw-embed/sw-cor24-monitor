@@ -35,6 +35,12 @@ build-ret42: build
     cp build/prog.bin build/ret42.bin
     cp build/prog.lst build/ret42.lst
 
+# Build failtest demo program at 0x3000
+build-failtest: build
+    just build-prog programs/failtest.c 0x3000
+    cp build/prog.bin build/failtest.bin
+    cp build/prog.lst build/failtest.lst
+
 # Build monitor binary
 build-monitor-bin: build
     cor24-run --assemble {{build_combined}} build/monitor.bin build/monitor.lst
@@ -45,20 +51,29 @@ build-exit7: build
     cp build/prog.bin build/exit7.bin
     cp build/prog.lst build/exit7.lst
 
-# Build everything
+# Build cat demo program at 0x5000
+build-cat: build
+    just build-prog programs/cat.c 0x5000
+    cp build/prog.bin build/cat.bin
+    cp build/prog.lst build/cat.lst
+
+# Build everything (test programs)
 build-all: build-monitor-bin build-echo build-ret42 build-exit7
 
-# Build and run with programs loaded
-run: build-all
-    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/ret42.bin@0x3000 --load-binary build/exit7.bin@0x4000 --entry 0 --speed 0 --terminal
+# Build demo programs
+build-demos: build-monitor-bin build-echo build-failtest build-cat
+
+# Build and run with demo programs loaded
+run: build-demos
+    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/failtest.bin@0x3000 --load-binary build/cat.bin@0x5000 --entry 0 --speed 0 --terminal
 
 # Build and run non-interactive test
-test: build-all
-    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/ret42.bin@0x3000 --load-binary build/exit7.bin@0x4000 --entry 0 --speed 0 --time 1
+test: build-demos
+    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/failtest.bin@0x3000 --load-binary build/cat.bin@0x5000 --entry 0 --speed 0 --time 1
 
 # Build and run with trace for debugging
-test-trace: build-all
-    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/ret42.bin@0x3000 --load-binary build/exit7.bin@0x4000 --entry 0 --speed 0 --time 1 --trace 100
+test-trace: build-demos
+    cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/failtest.bin@0x3000 --load-binary build/cat.bin@0x5000 --entry 0 --speed 0 --time 1 --trace 100
 
 # Clean build artifacts
 clean:

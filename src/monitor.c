@@ -312,8 +312,8 @@ int main() {
     /* Register programs */
     prog_count = 0;
     mon_register("echo", 0x2000, 0);
-    mon_register("ret42", 0x3000, 0);
-    mon_register("exit7", 0x4000, 0);
+    mon_register("failtest", 0x3000, 0);
+    mon_register("cat", 0x5000, 0);
     uart_puts("reg: ");
     uart_put_int(prog_count);
     uart_puts(" programs\n");

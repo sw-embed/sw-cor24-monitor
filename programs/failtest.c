@@ -1,5 +1,5 @@
-/* echo.c — demo program: prints "hello world" via service vector
- * Receives ctx (service vector pointer), returns 0.
+/* failtest.c — demo program: prints error message and returns nonzero RC
+ * Demonstrates nonzero return code handling.
  */
 
 int main(int ctx) {
@@ -8,10 +8,10 @@ int main(int ctx) {
     char *msg;
     vec = ctx;
     putchar_fn = vec[0];    /* slot 0 = svc_putchar */
-    msg = "hello world\n";
+    msg = "something went wrong\n";
     while (*msg) {
         putchar_fn(*msg);
         msg = msg + 1;
     }
-    return 0;
+    return 12;
 }
