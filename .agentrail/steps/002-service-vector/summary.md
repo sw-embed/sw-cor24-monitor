@@ -1,0 +1,1 @@
+Implemented service vector table at 0x500 with 5 service functions (putchar, getchar, write, readline, exit stub). Used tc24r function pointer support to store addresses directly from C — no assembler glue. Validated with indirect call test printing OK through the vector. 845 bytes, 1870 instructions on emulator.

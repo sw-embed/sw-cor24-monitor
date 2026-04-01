@@ -11,19 +11,11 @@ logical signature:
 int prog_main(mon_context *ctx)
 ```
 
-Where `ctx` points to a flat memory block containing:
-- Pointer to the invocation block (argc, argv, cmdline, flags)
-- Pointer to the service vector table
+Where `ctx` is a pointer directly to the service vector table
+(an array of function pointers). Programs index into this array
+to call monitor services.
 
-Since tc24r has no structs, `ctx` is a pointer to a known-offset
-flat region:
-
-```
-ctx + 0  →  pointer to service vector table
-ctx + 1  →  (reserved for future invocation block / argc / argv)
-```
-
-**Phase 1 simplification**: no argument passing yet. Programs
+**Current simplification**: no argument passing yet. Programs
 receive only the service vector pointer via ctx. Argument passing
 (argc, argv, cmdline) will be added in a later phase.
 
@@ -141,50 +133,43 @@ Memory regions:
 - 0xFEE000-0xFEFFFF: EBR (8 KB window, 3 KB populated)
 - 0xFF0000-0xFFFFFF: I/O space
 
-## Return Trampoline Mechanism
+## Program Invocation Trampoline (implemented)
 
-The trampoline ensures the monitor always regains control when a
-program finishes, regardless of how it exits.
+The trampoline (`src/trampoline.s`) ensures the monitor always
+regains control when a program finishes, via two paths:
 
-### Setup (before program entry)
+### Normal return path
 
-```asm
-; Push return trampoline address onto stack
-; so that when prog_main returns, it "returns" to the trampoline
-push mon_return_stub
-; Push ctx pointer as argument
-push ctx
-; Jump to program entry
-jump prog_entry
-```
+`mon_invoke_program(entry, ctx)` is an asm function called from
+the C `mon_run()`. It:
+1. Saves monitor SP to `mon_saved_sp` (for svc_exit)
+2. Pushes ctx as the program's argument
+3. Calls program entry via `jal r1,(r2)`
+4. Program's epilogue does `jmp (r1)`, returning here
+5. RC is in r0, returned to mon_run
 
-### Trampoline stub (assembler)
+### svc_exit path (non-local return)
 
-```
-mon_return_stub:
-    ; RC is in return register (r0/r1)
-    ; Store RC into monitor's result location
-    store rc, [mon_last_rc]
-    ; Restore monitor stack pointer
-    load sp, [mon_saved_sp]
-    ; Return to mon_run caller
-    jump mon_run_complete
-```
+`svc_exit_impl(rc)` is wired into service vector slot 4. When a
+program calls `svc_vector[4](rc)`:
+1. Saves rc to `mon_last_rc`
+2. Restores SP from `mon_saved_sp` (mon_invoke_program's frame)
+3. Performs mon_invoke_program's epilogue (pop r1/r2/fp)
+4. Reloads rc into r0 from `mon_last_rc`
+5. Returns to mon_run via `jmp (r1)`
 
-### Exit service path
+Both paths return to the C `mon_run()` with RC in r0.
 
-```
-svc_exit(rc):
-    ; Store RC
-    store rc, [mon_last_rc]
-    ; Restore monitor stack
-    load sp, [mon_saved_sp]
-    ; Same completion path
-    jump mon_run_complete
-```
+### Program startup (`src/prog_start.s`)
 
-Both paths converge at `mon_run_complete`, which restores monitor
-state and returns the RC to the caller (shell).
+Programs use `prog_start.s` instead of tc24r's default `_start`.
+It acts as a standard function: saves r1, forwards ctx to main,
+and returns via `jmp (r1)` so the trampoline regains control.
+
+### Key constraint: COR24 mov limitations
+
+`mov sp,X` only supports r0 and fp as source. SP save/restore
+must go through r0 (`mov r0,sp` / `mov sp,r0`) or fp.
 
 ## Error Handling
 

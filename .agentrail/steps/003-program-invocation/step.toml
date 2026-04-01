@@ -1,6 +1,6 @@
 number = 3
 slug = "program-invocation"
-status = "pending"
+status = "in-progress"
 description = """
 Implement mon_run() — the core program invocation mechanism with
 return trampoline and RC capture.

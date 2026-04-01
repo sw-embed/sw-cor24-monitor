@@ -1,9 +1,14 @@
 /* monitor.c — COR24 resident monitor
- * UART driver, service vector table, and boot initialization.
+ * UART driver, service vector table, program invocation, and boot init.
  */
 
 int *IO_UARTDATA;
 int *IO_UARTSTAT;
+
+/* --- Program invocation globals (used by asm trampoline) --- */
+
+int mon_saved_sp;
+int mon_last_rc;
 
 void uart_init() {
     IO_UARTDATA = 0xFF0100;
@@ -35,7 +40,32 @@ void uart_puts(char *s) {
     }
 }
 
-/* --- Service vector table (compiler-placed, address passed via context) --- */
+void uart_put_int(int n) {
+    int d;
+    int started;
+    int div;
+    if (n < 0) {
+        uart_putchar(45);
+        n = 0 - n;
+    }
+    if (n == 0) {
+        uart_putchar(48);
+        return;
+    }
+    div = 100000;
+    started = 0;
+    while (div > 0) {
+        d = n / div;
+        if (d > 0 || started) {
+            uart_putchar(48 + d);
+            started = 1;
+        }
+        n = n - d * div;
+        div = div / 10;
+    }
+}
+
+/* --- Service vector table --- */
 
 int (*svc_vector[5])();
 
@@ -87,9 +117,9 @@ int svc_readline(char *buf, int max) {
 }
 
 int svc_exit(int rc) {
-    /* Stub — will be implemented in phase 3 (program invocation).
-     * For now, print message and halt. */
-    uart_puts("svc_exit: halt\n");
+    /* Placeholder — overwritten by svc_set_exit() with asm impl.
+     * If somehow called before wiring, halt. */
+    uart_puts("svc_exit: not wired\n");
     while (1) {}
     return rc;
 }
@@ -100,21 +130,49 @@ void svc_init() {
     svc_vector[2] = svc_write;
     svc_vector[3] = svc_readline;
     svc_vector[4] = svc_exit;
+    /* svc_set_exit() overwrites slot 4 with asm svc_exit_impl */
+    svc_set_exit();
 }
 
-/* --- Validation: call putchar through the service vector --- */
+/* --- Program invocation --- */
 
-void svc_test() {
-    svc_vector[0](79);  /* 'O' */
-    svc_vector[0](75);  /* 'K' */
-    svc_vector[0](10);  /* newline */
+int mon_run(int entry) {
+    int rc;
+    int ctx;
+    ctx = svc_vector;
+    rc = mon_invoke_program(entry, ctx);
+    return rc;
 }
+
+/* --- Boot --- */
 
 int main() {
+    int rc;
     uart_init();
-    uart_puts("cor24 monitor v0.1\n");
+    uart_puts("cor24 monitor v0.2\n");
     svc_init();
     uart_puts("svc: vector ready\n");
-    svc_test();
+
+    /* Test: invoke echo at 0x2000 */
+    uart_puts("run echo\n");
+    rc = mon_run(0x2000);
+    uart_puts("rc=");
+    uart_put_int(rc);
+    uart_putchar(10);
+
+    /* Test: invoke ret42 at 0x3000 */
+    uart_puts("run ret42\n");
+    rc = mon_run(0x3000);
+    uart_puts("rc=");
+    uart_put_int(rc);
+    uart_putchar(10);
+
+    /* Test: invoke exit7 at 0x4000 (svc_exit test) */
+    uart_puts("run exit7\n");
+    rc = mon_run(0x4000);
+    uart_puts("rc=");
+    uart_put_int(rc);
+    uart_putchar(10);
+
     return 0;
 }
