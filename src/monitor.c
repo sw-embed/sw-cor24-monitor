@@ -1,9 +1,9 @@
 /* monitor.c — COR24 resident monitor
- * UART driver, service vector table, program invocation, and boot init.
+ * UART driver, service vector table, program invocation, shell, and boot init.
  */
 
-int *IO_UARTDATA;
-int *IO_UARTSTAT;
+char *IO_UARTDATA;
+char *IO_UARTSTAT;
 
 /* --- Program invocation globals (used by asm trampoline) --- */
 
@@ -16,6 +16,11 @@ int prog_names[16];
 int prog_entries[16];
 int prog_flags[16];
 int prog_count;
+
+/* --- Shared memory for sws integration --- */
+
+char mon_run_request[32];
+int mon_sws_entry;
 
 void uart_init() {
     IO_UARTDATA = 0xFF0100;
@@ -152,6 +157,34 @@ int mon_strcmp(char *a, char *b) {
     return *a - *b;
 }
 
+int mon_starts_with(char *str, char *prefix) {
+    while (*prefix) {
+        if (*str != *prefix) return 0;
+        str = str + 1;
+        prefix = prefix + 1;
+    }
+    return 1;
+}
+
+int mon_strlen(char *s) {
+    int n;
+    n = 0;
+    while (*s) {
+        n = n + 1;
+        s = s + 1;
+    }
+    return n;
+}
+
+void mon_strcpy(char *dst, char *src) {
+    while (*src) {
+        *dst = *src;
+        dst = dst + 1;
+        src = src + 1;
+    }
+    *dst = 0;
+}
+
 /* --- Program registry --- */
 
 int mon_register(char *name, int entry, int flags) {
@@ -207,16 +240,76 @@ int mon_run(int entry) {
     return rc;
 }
 
+/* --- Fallback shell --- */
+
+void mon_shell() {
+    char line[64];
+    int len;
+    int rc;
+
+    while (1) {
+        uart_puts("mon> ");
+        len = svc_readline(line, 64);
+
+        if (len == 0) {
+            continue;
+        }
+
+        if (mon_strcmp(line, "list") == 0) {
+            mon_list_programs();
+        } else if (mon_strcmp(line, "help") == 0) {
+            uart_puts("commands:\n");
+            uart_puts("  <name>  run program\n");
+            uart_puts("  list    list programs\n");
+            uart_puts("  help    show this help\n");
+        } else {
+            rc = mon_run_by_name(line);
+            if (rc >= 0) {
+                uart_puts("rc=");
+                uart_put_int(rc);
+                uart_putchar(10);
+            }
+        }
+    }
+}
+
+/* --- sws integration --- */
+
+int mon_sws_present() {
+    int *addr;
+    addr = 0x1000;
+    return *addr != 0;
+}
+
+void mon_sws_loop() {
+    int rc;
+
+    while (1) {
+        rc = mon_run(mon_sws_entry);
+        mon_last_rc = rc;
+
+        if (rc >= 256) {
+            /* sws returned run request — name in mon_run_request */
+            rc = mon_run_by_name(mon_run_request);
+            mon_last_rc = rc;
+        } else {
+            /* sws exited normally (rc=0 quit, other = error) */
+            uart_puts("sws exited, rc=");
+            uart_put_int(rc);
+            uart_putchar(10);
+            return;
+        }
+    }
+}
+
 /* --- Boot --- */
 
 int main() {
-    int rc;
     uart_init();
-    uart_puts("cor24 monitor v0.3\n");
+    uart_puts("cor24 monitor v0.4\n");
     svc_init();
-    uart_puts("svc: vector ready\n");
 
-    /* Register demo programs */
+    /* Register programs */
     prog_count = 0;
     mon_register("echo", 0x2000, 0);
     mon_register("ret42", 0x3000, 0);
@@ -225,43 +318,16 @@ int main() {
     uart_put_int(prog_count);
     uart_puts(" programs\n");
 
-    /* Test: list programs */
-    uart_puts("--- list ---\n");
-    mon_list_programs();
+    /* sws shell or fallback */
+    mon_sws_entry = 0x1000;
+    if (mon_sws_present()) {
+        uart_puts("sws: starting shell\n");
+        mon_sws_loop();
+    }
 
-    /* Test: find by name */
-    uart_puts("find echo=");
-    uart_put_int(mon_find_program("echo"));
-    uart_putchar(10);
-    uart_puts("find nope=");
-    uart_put_int(mon_find_program("nope"));
-    uart_putchar(10);
-
-    /* Test: run by name */
-    uart_puts("--- run echo ---\n");
-    rc = mon_run_by_name("echo");
-    uart_puts("rc=");
-    uart_put_int(rc);
-    uart_putchar(10);
-
-    uart_puts("--- run ret42 ---\n");
-    rc = mon_run_by_name("ret42");
-    uart_puts("rc=");
-    uart_put_int(rc);
-    uart_putchar(10);
-
-    uart_puts("--- run exit7 ---\n");
-    rc = mon_run_by_name("exit7");
-    uart_puts("rc=");
-    uart_put_int(rc);
-    uart_putchar(10);
-
-    /* Test: run unknown program */
-    uart_puts("--- run bogus ---\n");
-    rc = mon_run_by_name("bogus");
-    uart_puts("rc=");
-    uart_put_int(rc);
-    uart_putchar(10);
+    /* Fallback to built-in shell */
+    uart_puts("shell: fallback\n");
+    mon_shell();
 
     return 0;
 }

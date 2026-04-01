@@ -1,6 +1,6 @@
 number = 5
 slug = "sws-integration"
-status = "pending"
+status = "in-progress"
 description = """
 Integrate the monitor with sw-cor24-script (sws) as the UI shell,
 with a fallback minimal shell.

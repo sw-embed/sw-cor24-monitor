@@ -119,22 +119,16 @@ linear scan of `prog_names[]`.
 ```
 1. CPU reset → PC = 0x000000
 2. Assembler bootstrap:
-   a. Set monitor stack pointer
-   b. Initialize critical registers
-   c. Jump to C monitor_init()
-3. monitor_init():
-   a. Initialize UART hardware
-   b. Zero monitor BSS/data
-   c. Initialize service vector table at 0x500
-   d. Register built-in programs (echo, etc.)
-   e. Print boot banner
-   f. Invoke shell at 0x1000 via mon_run()
-4. Shell runs as a regular program:
-   a. Prints prompt
-   b. Reads command
-   c. Calls mon_run() for program invocation
-   d. Stores RC as $rc
-   e. Repeats
+   a. Set monitor stack pointer (SP = 0xFEEC00)
+   b. Jump to C main()
+3. main():
+   a. Initialize UART hardware (char * for byte-level I/O)
+   b. Initialize service vector table
+   c. Register programs (echo, ret42, exit7, etc.)
+   d. Print boot banner ("cor24 monitor v0.4")
+   e. Check if sws loaded at 0x1000 (non-zero word)
+   f. If sws present: enter sws dispatch loop
+   g. Otherwise: enter fallback built-in shell
 ```
 
 ## Execution Model
@@ -144,14 +138,41 @@ as its UI. When sws determines a program should run, it returns control
 to the monitor with the program name. The monitor invokes the program.
 When the program exits, the monitor calls sws again with the RC.
 
+### sws Interface Protocol
+
+sws communicates with the monitor via return codes and shared memory:
+
+- **RC >= 256**: "run request" — sws wrote a program name to
+  `mon_run_request[]` (32-byte shared buffer). Monitor runs the
+  named program, stores the result in `mon_last_rc`, and calls
+  sws again.
+- **RC == 0**: sws quit normally. Monitor falls through to fallback
+  shell or halts.
+- **Other RC**: sws error. Monitor prints diagnostic and falls
+  through to fallback shell.
+
 ```
-Monitor loop:
-  1. Call sws shell → sws reads command, returns program to run
-  2. Monitor invokes the named program
-  3. Program runs (uses service vector for I/O)
-  4. Program exits with RC
-  5. Monitor stores RC, goto 1
+Monitor sws loop:
+  1. Call sws via mon_run(0x1000)
+  2. If RC >= 256: extract name from mon_run_request
+     a. Run named program via mon_run_by_name
+     b. Store result RC in mon_last_rc
+     c. Goto 1
+  3. If RC == 0: sws exited, fall through
 ```
+
+### Fallback Shell
+
+If sws is not loaded at 0x1000, the monitor enters a built-in
+minimal shell:
+
+```
+mon> <name>     — run a registered program
+mon> list       — list registered programs
+mon> help       — show available commands
+```
+
+After each program run, the shell prints `rc=N`.
 
 sws lives in sw-cor24-script repo, compiled separately, loaded at
 0x1000 by the emulator. It is developed in parallel and may not
