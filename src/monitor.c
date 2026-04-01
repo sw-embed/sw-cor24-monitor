@@ -35,9 +35,9 @@ void uart_puts(char *s) {
     }
 }
 
-/* --- Service vector table at 0x500 --- */
+/* --- Service vector table (compiler-placed, address passed via context) --- */
 
-int *svc_vector;
+int (*svc_vector[5])();
 
 int svc_putchar(int ch) {
     uart_putchar(ch);
@@ -95,7 +95,6 @@ int svc_exit(int rc) {
 }
 
 void svc_init() {
-    svc_vector = 0x500;
     svc_vector[0] = svc_putchar;
     svc_vector[1] = svc_getchar;
     svc_vector[2] = svc_write;
@@ -106,18 +105,16 @@ void svc_init() {
 /* --- Validation: call putchar through the service vector --- */
 
 void svc_test() {
-    int (*fn)(int);
-    fn = svc_vector[0];
-    fn(79);  /* 'O' */
-    fn(75);  /* 'K' */
-    fn(10);  /* newline */
+    svc_vector[0](79);  /* 'O' */
+    svc_vector[0](75);  /* 'K' */
+    svc_vector[0](10);  /* newline */
 }
 
 int main() {
     uart_init();
     uart_puts("cor24 monitor v0.1\n");
     svc_init();
-    uart_puts("svc: vector at 0x500\n");
+    uart_puts("svc: vector ready\n");
     svc_test();
     return 0;
 }
