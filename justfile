@@ -75,6 +75,14 @@ test: build-demos
 test-trace: build-demos
     cor24-run --load-binary build/monitor.bin@0 --load-binary build/echo.bin@0x2000 --load-binary build/failtest.bin@0x3000 --load-binary build/cat.bin@0x5000 --entry 0 --speed 0 --time 1 --trace 100
 
+# Demo: monitor -> sws -> swye editor integration (build + filtered output)
+demo-editor:
+    bash demos/monitor-editor-demo.sh
+
+# Demo with --dump: full UART log + hex memory dump (shows edited buffer at 0x0F0400)
+demo-editor-dump:
+    bash demos/monitor-editor-demo.sh --dump
+
 # Clean build artifacts
 clean:
     rm -rf build/

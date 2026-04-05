@@ -16,7 +16,7 @@ invokes it, captures the return code, and passes control back to sws.
 ## Architecture
 
 ```
-Monitor (0x000) → sws shell (0x1000) → programs (0x2000+)
+Monitor (0x000) → sws shell (0x20000) → programs (0x40000+)
     │                                        │
     └── UART MMIO (0xFF0100) ◄───────────────┘
         (only monitor touches HW)       (via service vector)
@@ -25,6 +25,17 @@ Monitor (0x000) → sws shell (0x1000) → programs (0x2000+)
 - **Service vector** at 0x500: putchar, getchar, write, readline, exit
 - **Programs** receive a context pointer to the service vector
 - **RC propagation**: program RC flows back to shell as `$rc`
+
+## Demos
+
+```bash
+just demo-editor          # monitor -> sws -> swye editor (filtered output)
+just demo-editor-dump     # same, with full memory hex dump
+```
+
+The editor demo boots the monitor, launches sws via staged UART input,
+runs the yocto-ed editor against a preloaded text buffer with preloaded
+keystrokes, and displays the edited result back in sws.
 
 ## Status
 

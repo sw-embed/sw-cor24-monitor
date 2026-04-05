@@ -1,0 +1,9 @@
+pragma run-rc on
+echo "=== Editor Demo ==="
+echo "Launching swye editor..."
+run swye
+echo "--- Result ---"
+echo "rc.run:" $rc.run "rc.kind:" $rc.kind
+if {exists? $rc.output} { echo "Edited text:" ; echo $rc.output }
+echo "=== Done ==="
+exit

@@ -277,7 +277,7 @@ void mon_shell() {
 
 int mon_sws_present() {
     int *addr;
-    addr = 0x1000;
+    addr = 0x20000;
     return *addr != 0;
 }
 
@@ -314,12 +314,13 @@ int main() {
     mon_register("echo", 0x2000, 0);
     mon_register("failtest", 0x3000, 0);
     mon_register("cat", 0x5000, 0);
+    mon_register("swye", 0x40000, 0);
     uart_puts("reg: ");
     uart_put_int(prog_count);
     uart_puts(" programs\n");
 
     /* sws shell or fallback */
-    mon_sws_entry = 0x1000;
+    mon_sws_entry = 0x20000;
     if (mon_sws_present()) {
         uart_puts("sws: starting shell\n");
         mon_sws_loop();
